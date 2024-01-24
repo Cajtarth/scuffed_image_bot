@@ -152,7 +152,7 @@ cython_debug/
 #.idea/
 
 archive/
-files/
-files/temp/
+files/*
+files/temp/*
 OpenVoice/
 processed/
