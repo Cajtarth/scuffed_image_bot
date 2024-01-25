@@ -83,6 +83,8 @@ def gen_image(prompt, model, file_name, neg_prompt="", quality = "", nsfw=None, 
             ).images[0]
         image.save(file_name)
 
+        #del pipe # didn't seem to do much
+
     elif model == PROTEUS:
         # Load VAE component
         vae = AutoencoderKL.from_pretrained(
@@ -114,6 +116,9 @@ def gen_image(prompt, model, file_name, neg_prompt="", quality = "", nsfw=None, 
         ).images[0]
         image.save(file_name)
 
+        #torch.cuda.empty_cache()
+        #del pipe # didn't seem to do much
+
     elif model == ORANGE:
         if nsfw == None:
             pipeline = DiffusionPipeline.from_pretrained(model, torch_dtype=torch.float16, use_safetensors=True).to('cuda')
@@ -135,6 +140,8 @@ def gen_image(prompt, model, file_name, neg_prompt="", quality = "", nsfw=None, 
         image = images[0]
         image.save(file_name)
 
+        #del pipeline # didn't seem to do much
+
     else:
         pipeline = StableDiffusionPipeline.from_pretrained(model, torch_dtype=torch.float16)
 
@@ -142,6 +149,8 @@ def gen_image(prompt, model, file_name, neg_prompt="", quality = "", nsfw=None, 
 
         image = pipeline(prompt).images[0]
         image.save(file_name)
+
+        #del pipeline # didn't seem to do much
 
 def refine_image(prompt, base_image, filename):
     model_id = "timbrooks/instruct-pix2pix"

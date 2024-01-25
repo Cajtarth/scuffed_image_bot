@@ -16,42 +16,42 @@ logging.getLogger("apscheduler").propagate = False
 
 def gen_image_and_save_to_file(prompt, model, filename, neg_prompt, quality, nsfw, rating):
     global queue
-    print("Starting image thread...")
+    #print("Starting image thread...")
     ai_model.gen_image(prompt, model, filename, neg_prompt, quality, nsfw, rating)
     for q in queue:
         if q["filename"] == filename:
-            print("Marking complete...")
+            #print("Marking complete...")
             q["complete"] = True
 
 def gen_video_and_save_to_file(prompt, model, format, filename):
     global queue
-    print("Starting video thread...")
+    #print("Starting video thread...")
     ai_model.gen_video(prompt, model, format, filename)
     for q in queue:
         if q["filename"] == filename:
-            print("Marking complete...")
+            #print("Marking complete...")
             q["complete"] = True
 
 def gen_response(response_queue_index):
     global queue
     global response_queue
-    print("Starting response thread...")
+    #print("Starting response thread...")
 
     print(f"Assigning index {response_queue_index} from response_queue of length {len(response_queue)}.")
     i = response_queue_index
     r = response_queue[i]
 
     r["response"] = ai_model.gen_response_text(r["prompt"], r["owner"], r["type"], r["queue_size"])
-    print("Marking response complete...")
+    #print("Marking response complete...")
     r["complete"] = True
 
 def refine_image_and_save_to_file(prompt, base_image, filename):
     global queue
-    print("Starting refine thread...")
+    #print("Starting refine thread...")
     ai_model.refine_image(prompt, base_image, filename)
     for q in queue:
         if q["filename"] == filename:
-            print("Marking complete...")
+            #print("Marking complete...")
             q["complete"] = True
 
 
@@ -60,6 +60,8 @@ def refine_image_and_save_to_file(prompt, base_image, filename):
 # Global variables
 global queue #Generation queue
 queue = []
+global backup_queue
+backup_queue = []
 global response_queue #Queue for text responses (abandoned)
 response_queue = []
 global currently_working #If the bot is currently working on something
@@ -69,6 +71,8 @@ previously_drawing = False
 
 global suspended #Used to suspend bot from taking queue requests
 suspended = False
+global prev_suspended
+prev_suspended = False
 
 
 
@@ -91,6 +95,9 @@ async def check_queue():
     global previously_drawing
     global response_queue
     global queue
+    global backup_queue
+    global suspended
+    global prev_suspended
 
     #print("Checking queue...")
     if len(queue) == 0 and len(response_queue) == 0:
@@ -130,10 +137,15 @@ async def check_queue():
                 elif q["type"] == "refine":
                     await respond_refine_and_update_queue(0)
                     return
+                
+            if not previously_drawing and suspended:
+                return
+
             #Each type of return has a different set of dictionary values so we have to sort them; they all should have "type"
             #Also each type needs a different function to start a thread with
             if q["type"] == "image":
-                if previously_drawing: #If we are already working, we want to make sure we let the server know we are starting
+                if previously_drawing or prev_suspended: #If we are already working, we want to make sure we let the server know we are starting
+                    prev_suspended = False
                     mflags = hikari.MessageFlag.NONE
                     if q["private"] != None:
                         mflags = hikari.MessageFlag.EPHEMERAL #Ephemeral is a private message that only the user can see.
@@ -156,7 +168,7 @@ async def check_queue():
                 _thread = threading.Thread(target=refine_image_and_save_to_file, args=(q["ctx"].options.prompt, q["base_image"], q["filename"]))
                 _thread.start()
                 return
-        
+
     # At this point, there should be something in queue and currently_working should be true so we just need to cycle through everything and check if it's done
     if len(response_queue) > 0:
         #print(f"Prioritizing responses ({len(response_queue)})...")
@@ -347,11 +359,14 @@ async def scuff(ctx: lightbulb.Context) -> None:
     #This probably needs to be cleaned up as it has gotten quite bloated. I didn't plan to have so many models with so many different options!
     global currently_working
     global queue
+    global backup_queue
     global suspended
 
+    '''
     if suspended:
         await ctx.respond("Bot currently suspended. Please unsuspend bot or try again later.")
         return
+    '''
 
     #Convert plaintext names to bot models (I hate string comparisons and they crop up too much in this whole thing)
     lmodel = ""
@@ -398,21 +413,42 @@ async def scuff(ctx: lightbulb.Context) -> None:
 
     #await ai_model.gen_image(ctx.options.prompt, lmodel, filename, neg_prompt, quality) #Slow and locked up the bot while generating
     
-    if not currently_working:
-        pass
+    #if not currently_working:
+        #pass
         #Instead of doing this manually, we will let the queue handle it
-        '''currently_working = True
-        _thread = threading.Thread(target=gen_image_and_save_to_file, args=(ctx.options.prompt, lmodel, filename, neg_prompt, quality))
-        _thread.start()'''
-    else:
+        #'''currently_working = True
+        #_thread = threading.Thread(target=gen_image_and_save_to_file, args=(ctx.options.prompt, lmodel, filename, neg_prompt, quality))
+        #_thread.start()'''
+    #else:
+    if currently_working or suspended:
         #Need to let the users know if a request is being queued (possibly privately)
         mflags = hikari.MessageFlag.NONE
         if ctx.options.private != None:
             mflags = hikari.MessageFlag.EPHEMERAL
-        await ctx.respond("Queuing " + ctx.author.username +"'s request...", flags=mflags)
+        if suspended:
+            await ctx.respond("Queuing " + ctx.author.username +"'s request to be completed after bot suspension is lifted...", flags=mflags)
+        else:
+            await ctx.respond("Queuing " + ctx.author.username +"'s request...", flags=mflags)
 
-    #Append request to queue in form of dictionary; this probably should have been a full fledged class but it made sense when I started...
-    queue.append({"type":"image", "complete":False, "ctx":ctx, "last_prompt":last_prompt, "prompt": ctx.options.prompt,"model":lmodel, "filename":filename, "neg_prompt":neg_prompt, "rating":rating, "quality":quality, "owner":ctx.author.username, "nsfw":ctx.options.nsfw, "private":ctx.options.private})
+    dict = {"type":"image", 
+            "complete":False, 
+            "ctx":ctx, 
+            "last_prompt":last_prompt, 
+            "prompt": ctx.options.prompt,
+            "model":lmodel, 
+            "filename":filename, 
+            "neg_prompt":neg_prompt, 
+            "rating":rating, 
+            "quality":quality, 
+            "owner":ctx.author.username, 
+            "nsfw":ctx.options.nsfw, 
+            "private":ctx.options.private}
+    
+    if suspended:
+        backup_queue.append(dict)
+    else:
+        #Append request to queue in form of dictionary; this probably should have been a full fledged class but it made sense when I started...
+        queue.append(dict)
     
         
 @bot.command
@@ -425,6 +461,7 @@ async def video_gen(ctx: lightbulb.Context) -> None:
     #See scuff above as these functions are very similar
     global currently_working
     global queue
+    global backup_queue
     global suspended
 
     if suspended:
@@ -505,6 +542,7 @@ async def text_gen(ctx: lightbulb.Context) -> None:
 async def scuff_refine(ctx: lightbulb.Context) -> None:
     #See scuff above as these functions are very similar
     global queue
+    global backup_queue
     global suspended
 
     if suspended:
@@ -541,9 +579,9 @@ async def display_queue(ctx: lightbulb.Context) -> None:
     global queue
     global suspended
 
-    if not suspended or len(queue) > 0:
+    if not suspended or len(queue) > 0 or len(backup_queue) > 0:
+        formatted_queue = ""
         if len(queue) > 0:
-            formatted_queue = ""
             if suspended:
                 formatted_queue = "**(Bot Suspended) Current Queue:\n"
             else:
@@ -554,13 +592,26 @@ async def display_queue(ctx: lightbulb.Context) -> None:
                 else f"")
                 for i,item in enumerate(queue)
             )
-            formatted_queue += "\n"
+            formatted_queue += "\n\n"
 
-            await ctx.respond(formatted_queue)
+            #await ctx.respond(formatted_queue)
         else:
-            await ctx.respond("No current queue items.")
+            #await ctx.respond("No current queue items.")
+            formatted_queue += "No current queue items. \n\n"
+
+        if len(backup_queue) > 0:
+            formatted_queue += "**Backlog Queue:\n"
+            formatted_queue += "▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬**\n"
+            formatted_queue += "\n".join(
+                (f"**{i+1}.** {item['ctx'].author.username} - {item['type']} - {item['prompt']}" if item["private"] is None
+                else f"")
+                for i,item in enumerate(backup_queue)
+            )
+            formatted_queue += "\n"
+        
+        await ctx.respond(formatted_queue)
     else:
-        await ctx.respond("Bot currently suspended.")
+        await ctx.respond("Bot currently suspended with no items in queue.")
 
 @bot.command
 @lightbulb.command("suspend", "Toggles suspending the bot from accepting requests.")
@@ -568,7 +619,9 @@ async def display_queue(ctx: lightbulb.Context) -> None:
 async def suspend(ctx: lightbulb.Context) -> None:
     #Suspends bot which restricts any further queues. Unfortunately the bot still uses a lot of memory if any models are loaded.
     global queue
+    global backup_queue
     global suspended
+    global prev_suspended
 
     if not suspended:
         await ctx.respond("Suspending bot...")
@@ -576,6 +629,11 @@ async def suspend(ctx: lightbulb.Context) -> None:
     else:
         await ctx.respond("Resuming bot function...")
         suspended = False
+        prev_suspended = True
+        if len(backup_queue) > 0:
+            await ctx.respond("Starting on backlog of requests...")
+            for i in range(len(backup_queue)):
+                queue.append(backup_queue.pop(0))
 
 @bot.command
 @lightbulb.command("debug", "Debug for testing.")
