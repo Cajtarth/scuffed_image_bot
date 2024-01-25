@@ -69,6 +69,9 @@ currently_working = False
 global previously_drawing #If the bot is in the middle of the queue
 previously_drawing = False
 
+global baby_shaman #Best not to ask
+baby_shaman = False
+
 global suspended #Used to suspend bot from taking queue requests
 suspended = False
 global prev_suspended
@@ -313,8 +316,11 @@ async def respond_video_and_update_queue(queue_index):
 
 @bot.listen()
 async def on_start(event: hikari.events.lifetime_events.StartedEvent) -> None:
+    global suspended
+    global baby_shaman
     #Plan to let the bot announce that it is online/offline eventually
-    pass
+    suspended = False
+    baby_shaman = False
 
 
 @bot.listen()
@@ -361,6 +367,7 @@ async def scuff(ctx: lightbulb.Context) -> None:
     global queue
     global backup_queue
     global suspended
+    global baby_shaman
 
     '''
     if suspended:
@@ -381,16 +388,21 @@ async def scuff(ctx: lightbulb.Context) -> None:
     elif ctx.options.model == "Orange":
         lmodel = ai_model.ORANGE
 
+    prompt = ctx.options.prompt
+
     mflags = hikari.MessageFlag.NONE
     if ctx.options.private != None:
         mflags = hikari.MessageFlag.EPHEMERAL
 
+    if baby_shaman:
+        prompt += ", hyper-realistic, 4K"
+
     
     #Response needs to be within 3 seconds to work with discord
-    await ctx.respond(ctx.author.username + " requested a drawing of \"" + ctx.options.prompt +
+    await ctx.respond(ctx.author.username + " requested a drawing of \"" + prompt +
                     "\" (using " + ctx.options.model + ") from Scuffed Image Bot.", flags=mflags)
     
-    last_prompt = "Starting on " + ctx.author.username + "'s image with prompt " + ctx.options.prompt
+    last_prompt = "Starting on " + ctx.author.username + "'s image with prompt " + prompt
     
     neg_prompt = ctx.options.neg_prompt
     quality = ctx.options.quality
@@ -434,7 +446,7 @@ async def scuff(ctx: lightbulb.Context) -> None:
             "complete":False, 
             "ctx":ctx, 
             "last_prompt":last_prompt, 
-            "prompt": ctx.options.prompt,
+            "prompt": prompt,
             "model":lmodel, 
             "filename":filename, 
             "neg_prompt":neg_prompt, 
@@ -640,6 +652,19 @@ async def suspend(ctx: lightbulb.Context) -> None:
 @lightbulb.implements(lightbulb.SlashCommand)
 async def debug(ctx: lightbulb.Context) -> None:
     pass
+
+@bot.command
+@lightbulb.command("baby-shaman", "Activate baby shaman mode. Adds hyper-realistic and 4K to every prompt.")
+@lightbulb.implements(lightbulb.SlashCommand)
+async def baby_shaman(ctx: lightbulb.Context) -> None:
+    global baby_shaman
+
+    if baby_shaman:
+        baby_shaman = False
+        await ctx.respond("Disabling baby shaman mode...")
+    else:
+        baby_shaman = True
+        await ctx.respond("Activating baby shaman mode...")
 
 #Finally, let's run the bot :D
 bot.run()
